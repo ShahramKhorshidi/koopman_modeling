@@ -1,9 +1,9 @@
 import numpy as np
 
 class Kalman_Filter:
-    def __init__(self, koopman_model, c_matrix):
+    def __init__(self, A_matrix, B_matric, C_matrix):
         """
-        Kalman filter class to be used with the learned model with Koopmanoperator.
+        Kalman filter class to be used with the linear model learned with Koopmanoperator.
         
         Args:
             Psi_x_pre: priori estimated mean of state-observables, (state-observables: projected states into the high dimensional space).
@@ -12,30 +12,33 @@ class Kalman_Filter:
             R: Measurement noise covariance matrix.
             Sigma: Error covariance matrix.
         """
-        self.obs_state_dim = koopman_model.shape[0]
-        self.measurement_dim  =c_matrix.shape[0]
+        # System dimensions
+        self.n_x = A_matrix.shape[0] # Number of states
+        self.n_u = B_matric.shape[1] # Number of inputs
+        self.n_y = C_matrix.shape[0] # Number of measurements
+
+        # System Matrices        
+        self.A = A_matrix
+        self.B = B_matric
+        self.C = C_matrix
+
+        self.x_pre = np.zeros((self.n_x), dtype=np.float64)
+        self.x_post = np.zeros((self.n_x), dtype=np.float64)
         
-        self.A = koopman_model[:, :self.obs_state_dim]
-        self.B = koopman_model[:, self.obs_state_dim:]
-        self.C = c_matrix
-        
-        self.Psi_x_pre = np.zeros((self.obs_state_dim), dtype=np.float64)
-        self.Psi_x_post = np.zeros((self.obs_state_dim), dtype=np.float64)
-        
-        self.Q = np.diag((1e-1) * np.ones([self.obs_state_dim]))
-        self.R = np.diag((1e-2) * np.ones([self.measurement_dim]))
-        self.Sigma_pre = np.zeros((self.obs_state_dim, self.obs_state_dim), dtype=np.float64)
-        self.Sigma_post = np.zeros((self.obs_state_dim, self.obs_state_dim), dtype=np.float64)
+        self.Q = np.diag((1e-5) * np.ones([self.n_x]))
+        self.R = np.diag((1e+5) * np.ones([self.n_y]))
+        self.Sigma_pre = np.zeros((self.n_x, self.n_x), dtype=np.float64)
+        self.Sigma_post = np.zeros((self.n_x, self.n_x), dtype=np.float64)
     
-    def init_filter(self, Psi_x0):
-        self.Psi_x_post = Psi_x0
+    def init_filter(self, x0):
+        self.x_post = x0
     
     def prediction_step(self, u):
-        self.Psi_x_pre = np.dot(self.A, self.Psi_x_post) + np.dot(self.B, u)
+        self.x_pre = np.dot(self.A, self.x_post) + np.dot(self.B, u)
         self.Sigma_pre = np.dot(self.A, np.dot(self.Sigma_post, self.A.T)) + self.Q
     
     def update_step(self, y):
-        y_est = np.dot(self.C, self.Psi_x_pre)
+        y_est = np.dot(self.C, self.x_pre)
         
         # Innovation covariance
         S = np.dot(self.C, np.dot(self.Sigma_pre, self.C.T)) + self.R
@@ -43,7 +46,7 @@ class Kalman_Filter:
         # Kalman gain
         K = np.dot(self.Sigma_pre, np.dot(self.C.T, np.linalg.inv(S)))
         
-        self.Psi_x_post = self.Psi_x_pre + np.dot(K, (y - y_est))
+        self.x_post = self.x_pre + np.dot(K, (y - y_est))
         self.Sigma_post = self.Sigma_pre - np.dot(K, np.dot(self.C, self.Sigma_pre))
     
     def update_filter(self, u, y):
@@ -62,6 +65,6 @@ class Kalman_Filter:
         Returns:
             _type_: updated mean of state-observables estimate.
         """
-        return self.Psi_x_post
+        return self.x_post
     
 

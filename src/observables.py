@@ -5,7 +5,7 @@ from sklearn.preprocessing import PolynomialFeatures
 class Observables:
     
     @staticmethod
-    def linear():
+    def identity():
         return lambda x: x
     
     @staticmethod
@@ -36,7 +36,7 @@ class Observables:
         return lambda x: np.exp(rate * x)
     
     @staticmethod
-    def rbf(n_states, n_centers, centers=None, rbf_type="gauss",  gamma=1.0):
+    def rbf(n_states, n_centers, centers=None, rbf_type="gauss",  gamma=1.0, polyharmonic_coeff=1.0):
         """
         Create a radial basis function (RBF) using the given number of centers and gamma value.
 
@@ -60,6 +60,8 @@ class Observables:
                 rbf_values = np.exp(-gamma * r_squared).T
             elif(rbf_type == "thinplate"):
                 rbf_values = (r_squared * np.log(np.sqrt(r_squared))).T
+            elif(rbf_type == "polyharmonic"):
+                rbf_values = (r_squared ** (polyharmonic_coeff / 2) * np.log(np.sqrt(r_squared))).T
             return rbf_values
         
         return rbf_function
