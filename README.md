@@ -94,7 +94,6 @@ python demo/demo_state_est.py --estimator mhe --motion jump
 The available values for `--motion` are:
 
 - `trot`
-- `trot_fast`
 - `jump`
 - `bound`
 
@@ -105,15 +104,6 @@ reduced:
 ```bash
 python demo/demo_state_est.py --estimator mhe --motion jump \
     --samples 1000 --horizon 30
-```
-
-### (3) Save results without opening a plot window
-
-```bash
-python demo/demo_state_est.py --estimator kf --motion trot_fast \
-    --save results/trot_fast_kf.png \
-    --save_estimate results/trot_fast_kf.dat \
-    --no_show
 ```
 
 The demo reports the measurement and estimation RMSE for each centroidal-state
@@ -206,19 +196,6 @@ python demo/demo_dmdc.py \
 
 This command only trains and saves the model. Open-loop validation runs when
 `--trajectory` or both explicit validation-file arguments are also supplied.
-
-For compatibility with the original centroidal dataset, the demo also detects
-the legacy numbered names `0_cent_state.dat` and `0_input_vector.dat`
-automatically. Other naming schemes can be supplied without changing the code:
-
-```bash
-python demo/demo_dmdc.py \
-    --training_source trajectories \
-    --state_file_pattern "run_{index}_state.dat" \
-    --input_file_pattern "run_{index}_input.dat" \
-    --first_trajectory 0 \
-    --last_trajectory 10
-```
 
 List all learning options with:
 
