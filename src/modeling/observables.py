@@ -4,6 +4,11 @@ from sklearn.preprocessing import PolynomialFeatures
 
 
 class Observables:
+    """Factory for observable functions used to build Koopman embeddings.
+
+    Provides nonlinear feature, radial-basis, tensor, and time-delay lifts.
+    """
+
     
     @staticmethod
     def identity():

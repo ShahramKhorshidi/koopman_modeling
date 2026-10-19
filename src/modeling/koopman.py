@@ -23,6 +23,11 @@ def _safe_range(data):
 
 
 class BaseKoopman:
+    """Base class for Koopman models built from state snapshot pairs.
+
+    Validates the data and provides shared serialization and plotting helpers.
+    """
+
     def __init__(self, X, X_prime=None):
         """_summary_
 
@@ -86,6 +91,11 @@ class BaseKoopman:
 
 
 class DMD(BaseKoopman):
+    """Dynamic Mode Decomposition (DMD) for autonomous systems.
+
+    Fits a linear operator that advances state snapshots without control inputs.
+    """
+
     def __init__(self, X, X_prime=None, svd_rank=None):
         """_summary_
 
@@ -143,6 +153,11 @@ class DMD(BaseKoopman):
 
 
 class DMDC(BaseKoopman):
+    """Dynamic Mode Decomposition with Control (DMDc) for actuated systems.
+
+    Fits linear state and input matrices directly from snapshot data.
+    """
+
     def __init__(self, X, X_prime=None, U=None ,svd_rank=None):
         super().__init__(X, X_prime)
         if U is None:
@@ -340,6 +355,11 @@ class DMDC(BaseKoopman):
 
 
 class EDMDC(BaseKoopman):
+    """Extended Dynamic Mode Decomposition with Control (EDMDc).
+
+    Lifts states through configurable observables while retaining direct inputs.
+    """
+
     def __init__(self, X, X_prime=None, U=None, Y=None, list_of_obs=None):
         super().__init__(X, X_prime)
         if U is None:
@@ -678,6 +698,11 @@ class EDMDC(BaseKoopman):
 
 
 class EDMDCKIC(BaseKoopman):
+    """EDMDc with Koopman with Inputs and Control (KIC).
+
+    Lifts both states and inputs through configurable observable functions.
+    """
+
     def __init__(self, X, X_prime=None, U=None, Y=None,
                  list_of_state_obs=None, list_of_input_obs=None):
         super().__init__(X, X_prime)
