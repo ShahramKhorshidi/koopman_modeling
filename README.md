@@ -17,14 +17,16 @@ Two estimators use the same learned Koopman/DMDc model:
   window, formulated as a quadratic program and solved with OSQP.
 
 A pretrained model and four test motions are included so that the estimation
-demos can be run directly after installation. The data used to train the model
-are intentionally not included.
+demos can be run directly after installation. All provided data were generated
+with the Solo12 quadruped performing dynamic locomotion in PyBullet.
 
 ---
 
 ## Key features
 
-- DMDc-based learning of a controlled linear centroidal-dynamics model
+- General Koopman-embedding learning with DMD, DMDc, EDMDc, and EDMDcKIC,
+  using configurable identity, polynomial, Fourier, radial-basis, tensor, and
+  time-delay observables
 - Koopman-model integration with a Kalman filter and an MHE
 - Estimation of CoM position, linear momentum, and angular momentum
 - Included pretrained model and test trajectories for trot, fast trot, jump,
@@ -36,7 +38,8 @@ are intentionally not included.
 
 ## Repository structure
 
-- `src/modeling/`: DMD, DMDc, extended DMDc, and observable definitions
+- `src/modeling/`: general Koopman-embedding models and configurable state and
+  input observables
 - `src/estimation/`: Kalman filter and moving horizon estimator
 - `demo/demo_dmdc.py`: example of learning and validating the DMDc model
 - `demo/demo_state_est.py`: runnable Koopman-based centroidal estimation demo
@@ -137,10 +140,8 @@ python demo/demo_state_est.py --help
 4. Save the learned model and validate it by open-loop prediction on a separate
    trajectory.
 
-The original training data are not distributed with this repository. This
-keeps the download small and separates the code and reproducible estimation
-examples from the dataset used to identify the model. The included pretrained
-model is sufficient for running `demo/demo_state_est.py`.
+The included pretrained Solo12 model is sufficient for running
+`demo/demo_state_est.py` with the provided PyBullet trajectories.
 
 To retrain the model with your own data, provide tab-separated matrices with one
 sample per column. The state and input dimensions are inferred automatically
