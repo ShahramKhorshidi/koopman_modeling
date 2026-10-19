@@ -135,7 +135,7 @@ python demo/demo_state_est.py --help
    \(x_{k+1} = A x_k + B u_k\) using DMDc.
 3. Estimate the process-noise covariance from the training residuals.
 4. Save the learned model and validate it by open-loop prediction on a separate
-   motion.
+   trajectory.
 
 The original training data are not distributed with this repository. This
 keeps the download small and separates the code and reproducible estimation
@@ -143,19 +143,22 @@ examples from the dataset used to identify the model. The included pretrained
 model is sufficient for running `demo/demo_state_est.py`.
 
 To retrain the model with your own data, provide tab-separated matrices with one
-sample per column. The combined-data layout expected by the demo is:
+sample per column. The state and input dimensions are inferred automatically
+from the number of rows, so they do not need to match the included centroidal
+example. The combined-data layout expected by the demo is:
 
 ```text
-<data_dir>/training_data_state.dat        # x_k,       shape: 9 x N
-<data_dir>/training_data_state_prime.dat  # x_{k+1},   shape: 9 x N
-<data_dir>/training_data_input.dat        # u_k,       shape: 24 x N
+<data_dir>/training_data_state.dat        # x_k,       shape: n_x x N
+<data_dir>/training_data_state_prime.dat  # x_{k+1},   shape: n_x x N
+<data_dir>/training_data_input.dat        # u_k,       shape: n_u x N
 ```
 
-For open-loop validation, the same directory must also contain:
+Open-loop validation is optional. To enable it with `--trajectory`, use the
+following generic filenames in the same directory:
 
 ```text
-<data_dir>/<motion>_test_cent_state.dat   # shape: 9 x T
-<data_dir>/<motion>_test_input_vector.dat # shape: 24 x T
+<data_dir>/<trajectory>_test_state.dat # shape: n_x x T
+<data_dir>/<trajectory>_test_input.dat # shape: n_u x T
 ```
 
 Then run:
@@ -164,22 +167,69 @@ Then run:
 python demo/demo_dmdc.py \
     --data_dir /path/to/training_and_validation_data \
     --training_source combined \
-    --motion trot \
+    --trajectory trajectory_01 \
     --model_path results/koopman_dmdc_model.pkl \
     --save results/dmdc_validation.png \
     --no_show
 ```
 
+Use `--state_dim` and `--input_dim` when you want the demo to check explicit
+dimensions instead of only inferring them. For example:
+
+```bash
+python demo/demo_dmdc.py \
+    --data_dir /path/to/data \
+    --state_dim 6 \
+    --input_dim 4 \
+    --skip_validation
+```
+
+`--skip_validation` trains and saves a model without requiring a separate test
+trajectory. For validation files that do not follow the default naming scheme,
+use `--validation_state_file` and `--validation_input_file`. The validation
+plots and per-state RMSE output automatically adapt to `n_x`; use `--dt` to set
+the sampling period used on the plot's time axis.
+
 Alternatively, `--training_source trajectories` constructs the snapshot
-matrices from numbered files such as `0_cent_state.dat` and
-`0_input_vector.dat`. Use `--first_trajectory`, `--last_trajectory`, and
+matrices from numbered files such as `0_state.dat` and `0_input.dat`. Use
+`--first_trajectory`, `--last_trajectory`, and
 `--trim_start` to select and trim those trajectories.
+
+```bash
+python demo/demo_dmdc.py \
+    --training_source trajectories \
+    --first_trajectory 0 \
+    --last_trajectory 30 \
+    --trim_start 500
+```
+
+This command only trains and saves the model. Open-loop validation runs when
+`--trajectory` or both explicit validation-file arguments are also supplied.
+
+For compatibility with the original centroidal dataset, the demo also detects
+the legacy numbered names `0_cent_state.dat` and `0_input_vector.dat`
+automatically. Other naming schemes can be supplied without changing the code:
+
+```bash
+python demo/demo_dmdc.py \
+    --training_source trajectories \
+    --state_file_pattern "run_{index}_state.dat" \
+    --input_file_pattern "run_{index}_input.dat" \
+    --first_trajectory 0 \
+    --last_trajectory 10
+```
 
 List all learning options with:
 
 ```bash
 python demo/demo_dmdc.py --help
 ```
+
+The reusable learning demo and the classes under `src/modeling/` support
+arbitrary state and input dimensions. `demo/demo_state_est.py` remains specific
+to the provided centroidal-estimation example because its state definitions,
+sensor-noise values, and plots are physical quantities defined for the included
+9-state, 24-input model.
 
 ---
 
@@ -214,18 +264,13 @@ python -m unittest discover -s tests -v
 
 ## Citation
 
-If you use this repository in academic work, please cite:
-
-- [Paper on arXiv](https://arxiv.org/abs/2403.13366)
-- [DOI](https://doi.org/10.1109/IROS58592.2024.10801750)
+If you use this repository in academic work, please cite: [paper](https://arxiv.org/abs/2403.13366), [doi](https://doi.org/10.1109/IROS58592.2024.10801750)
 
 ```bibtex
-@inproceedings{khorshidi2024centroidal,
+@inproceedings{khorshidi24iros,
+  title={Centroidal State Estimation based on the Koopman Embedding for Dynamic Legged Locomotion}, 
   author={Khorshidi, Shahram and Dawood, Murad and Bennewitz, Maren},
-  title={Centroidal State Estimation Based on the Koopman Embedding for Dynamic Legged Locomotion},
-  booktitle={2024 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
-  pages={12832--12839},
-  year={2024},
-  doi={10.1109/IROS58592.2024.10801750}
+  booktitle={Proc. of the IEEE/RSJ Int. Conf. on Intelligent Robots and Systems (IROS)}, 
+  year={2024}
 }
 ```
