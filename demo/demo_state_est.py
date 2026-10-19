@@ -230,8 +230,8 @@ def plot_estimation_results(time, estimator_name, reference, measurement,
     axes_names = ["x", "y", "z"]
     figure, axes = plt.subplots(3, 3, figsize=(14, 9), sharex=True)
 
-    for column, (title, unit, rows) in enumerate(groups):
-        for row, state_index in enumerate(range(rows.start, rows.stop)):
+    for row, (title, unit, rows) in enumerate(groups):
+        for column, state_index in enumerate(range(rows.start, rows.stop)):
             axis = axes[row, column]
             axis.plot(time, reference[state_index], "b", label="Reference")
             axis.plot(
@@ -248,7 +248,7 @@ def plot_estimation_results(time, estimator_name, reference, measurement,
                 linewidth=0.9,
                 label=f"Koopman {estimator_name.upper()}",
             )
-            axis.set_title(f"{title}: {axes_names[row]}")
+            axis.set_title(f"{title}: {axes_names[column]}")
             axis.set_ylabel(unit)
             axis.grid(True)
 
@@ -268,6 +268,7 @@ def plot_estimation_results(time, estimator_name, reference, measurement,
         plt.show()
     else:
         plt.close(figure)
+    return figure
 
 
 def parse_args():

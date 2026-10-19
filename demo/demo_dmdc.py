@@ -10,15 +10,27 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 from src.modeling.koopman import DMDC
 
 
-STATE_DIMENSION = 9
-INPUT_DIMENSION = 24
-SAMPLING_PERIOD = 0.001
+DEFAULT_SAMPLING_PERIOD = 0.001
+GENERIC_STATE_FILE_PATTERN = "{index}_state.dat"
+GENERIC_INPUT_FILE_PATTERN = "{index}_input.dat"
+LEGACY_STATE_FILE_PATTERN = "{index}_cent_state.dat"
+LEGACY_INPUT_FILE_PATTERN = "{index}_input_vector.dat"
 
 
-def load_matrix(file_path, expected_rows):
-    """Load a trajectory matrix and check its orientation."""
-    matrix = np.loadtxt(file_path, delimiter="\t", dtype=np.float64)
-    if matrix.ndim != 2 or matrix.shape[0] != expected_rows:
+def load_matrix(file_path, expected_rows=None):
+    """Load a trajectory matrix and optionally validate its row count."""
+    matrix = np.loadtxt(
+        file_path,
+        delimiter="\t",
+        dtype=np.float64,
+        ndmin=2,
+    )
+    if matrix.ndim != 2:
+        raise ValueError(
+            f"{file_path} must be a two-dimensional matrix; "
+            f"received shape {matrix.shape}"
+        )
+    if expected_rows is not None and matrix.shape[0] != expected_rows:
         raise ValueError(
             f"{file_path} must contain {expected_rows} rows; "
             f"received shape {matrix.shape}"
@@ -28,22 +40,94 @@ def load_matrix(file_path, expected_rows):
     return matrix
 
 
+def select_numbered_file_pattern(
+    data_dir,
+    first_trajectory,
+    requested_pattern,
+    generic_pattern,
+    legacy_pattern,
+    data_name,
+):
+    """Select an explicit pattern or detect a supported filename convention."""
+    patterns = (
+        [requested_pattern]
+        if requested_pattern is not None
+        else [generic_pattern, legacy_pattern]
+    )
+    attempted_paths = []
+    for pattern in patterns:
+        if "{index" not in pattern:
+            raise ValueError(
+                f"The {data_name} file pattern must contain an "
+                "'{index}' placeholder"
+            )
+        try:
+            filename = pattern.format(index=first_trajectory)
+        except (KeyError, IndexError, ValueError) as error:
+            raise ValueError(
+                f"The {data_name} file pattern must contain a valid "
+                "'{index}' placeholder"
+            ) from error
+        candidate = data_dir / filename
+        attempted_paths.append(candidate)
+        if candidate.is_file():
+            return pattern
+
+    attempted = ", ".join(str(path) for path in attempted_paths)
+    raise FileNotFoundError(
+        f"Could not find the first numbered {data_name} file. Tried: {attempted}"
+    )
+
+
 def combine_training_trajectories(
     data_dir,
     first_trajectory=0,
     last_trajectory=30,
     trim_start=500,
+    state_dimension=None,
+    input_dimension=None,
+    state_file_pattern=None,
+    input_file_pattern=None,
 ):
     """Build X, X_prime, and U from the numbered training trajectories."""
+    if first_trajectory > last_trajectory:
+        raise ValueError("first_trajectory must not exceed last_trajectory")
+
+    state_file_pattern = select_numbered_file_pattern(
+        data_dir,
+        first_trajectory,
+        state_file_pattern,
+        GENERIC_STATE_FILE_PATTERN,
+        LEGACY_STATE_FILE_PATTERN,
+        "state",
+    )
+    input_file_pattern = select_numbered_file_pattern(
+        data_dir,
+        first_trajectory,
+        input_file_pattern,
+        GENERIC_INPUT_FILE_PATTERN,
+        LEGACY_INPUT_FILE_PATTERN,
+        "input",
+    )
+    print(f"Using state file pattern: {state_file_pattern}")
+    print(f"Using input file pattern: {input_file_pattern}")
+
     state_snapshots = []
     next_state_snapshots = []
     input_snapshots = []
 
     for trajectory_number in range(first_trajectory, last_trajectory + 1):
-        state_file = data_dir / f"{trajectory_number}_cent_state.dat"
-        input_file = data_dir / f"{trajectory_number}_input_vector.dat"
-        state = load_matrix(state_file, STATE_DIMENSION)
-        control_input = load_matrix(input_file, INPUT_DIMENSION)
+        state_file = data_dir / state_file_pattern.format(index=trajectory_number)
+        input_file = data_dir / input_file_pattern.format(index=trajectory_number)
+        state = load_matrix(state_file, state_dimension)
+        control_input = load_matrix(input_file, input_dimension)
+
+        # When dimensions are not supplied, infer them from the first
+        # trajectory and use them to validate every subsequent trajectory.
+        if state_dimension is None:
+            state_dimension = state.shape[0]
+        if input_dimension is None:
+            input_dimension = control_input.shape[0]
 
         if state.shape[1] != control_input.shape[1]:
             raise ValueError(
@@ -66,13 +150,17 @@ def combine_training_trajectories(
     return X, X_prime, U
 
 
-def load_combined_training_data(data_dir):
-    """Load the previously combined snapshot matrices."""
-    X = load_matrix(data_dir / "training_data_state.dat", STATE_DIMENSION)
+def load_combined_training_data(
+    data_dir,
+    state_dimension=None,
+    input_dimension=None,
+):
+    """Load snapshot matrices, inferring dimensions when they are omitted."""
+    X = load_matrix(data_dir / "training_data_state.dat", state_dimension)
     X_prime = load_matrix(
-        data_dir / "training_data_state_prime.dat", STATE_DIMENSION
+        data_dir / "training_data_state_prime.dat", X.shape[0]
     )
-    U = load_matrix(data_dir / "training_data_input.dat", INPUT_DIMENSION)
+    U = load_matrix(data_dir / "training_data_input.dat", input_dimension)
     if X.shape != X_prime.shape or X.shape[1] != U.shape[1]:
         raise ValueError("The combined training matrices have incompatible shapes")
     return X, X_prime, U
@@ -84,21 +172,50 @@ def fit_koopman_model(X, X_prime, U, svd_rank=None):
     singular_values = koopman_model.fit_model()
 
     residual = X_prime - koopman_model.A_matrix @ X - koopman_model.B_matrix @ U
-    koopman_model.process_noise_covariance = np.cov(residual, bias=True)
+    koopman_model.process_noise_covariance = np.atleast_2d(
+        np.cov(residual, bias=True)
+    )
     koopman_model.training_residual_std = np.std(residual, axis=1)
     koopman_model.training_state_minimum = np.min(X, axis=1)
     koopman_model.training_state_maximum = np.max(X, axis=1)
     return koopman_model, singular_values
 
 
-def load_test_data(data_dir, motion, number_of_samples=None):
+def load_test_data(
+    data_dir,
+    trajectory,
+    number_of_samples=None,
+    state_dimension=None,
+    input_dimension=None,
+    state_file=None,
+    input_file=None,
+):
     """Load a clean test trajectory for open-loop model validation."""
-    state = load_matrix(
-        data_dir / f"{motion}_test_cent_state.dat", STATE_DIMENSION
-    )
-    control_input = load_matrix(
-        data_dir / f"{motion}_test_input_vector.dat", INPUT_DIMENSION
-    )
+    if state_file is not None:
+        state_path = Path(state_file)
+    else:
+        state_candidates = [
+            data_dir / f"{trajectory}_test_state.dat",
+            data_dir / f"{trajectory}_test_cent_state.dat",
+        ]
+        state_path = next(
+            (path for path in state_candidates if path.is_file()),
+            state_candidates[0],
+        )
+
+    if input_file is not None:
+        input_path = Path(input_file)
+    else:
+        input_candidates = [
+            data_dir / f"{trajectory}_test_input.dat",
+            data_dir / f"{trajectory}_test_input_vector.dat",
+        ]
+        input_path = next(
+            (path for path in input_candidates if path.is_file()),
+            input_candidates[0],
+        )
+    state = load_matrix(state_path, state_dimension)
+    control_input = load_matrix(input_path, input_dimension)
     available_samples = min(state.shape[1], control_input.shape[1])
     if number_of_samples is None:
         number_of_samples = available_samples
@@ -113,46 +230,80 @@ def load_test_data(data_dir, motion, number_of_samples=None):
 
 
 def print_model_errors(reference, prediction):
-    """Report RMSE for the three centroidal-state blocks."""
-    state_blocks = {
-        "CoM position": slice(0, 3),
-        "Linear momentum": slice(3, 6),
-        "Angular momentum": slice(6, 9),
-    }
-    for name, rows in state_blocks.items():
-        rmse = np.sqrt(np.mean((reference[rows] - prediction[rows]) ** 2))
-        print(f"{name} open-loop RMSE: {rmse:.6e}")
+    """Report overall and per-state open-loop prediction errors."""
+    if reference.shape != prediction.shape:
+        raise ValueError("Reference and prediction must have the same shape")
+
+    error = reference - prediction
+    overall_rmse = np.sqrt(np.mean(error ** 2))
+    per_state_rmse = np.sqrt(np.mean(error ** 2, axis=1))
+    print(f"Overall open-loop RMSE: {overall_rmse:.6e}")
+    print("Per-state open-loop RMSE:")
+    for state_index, rmse in enumerate(per_state_rmse):
+        print(f"  x[{state_index}]: {rmse:.6e}")
 
 
-def plot_model_results(reference, prediction, save_path=None, show=True):
+def _state_plot_metadata(number_of_states):
+    """Return descriptive labels for the original centroidal state."""
+    if number_of_states == 9:
+        groups = [
+            ("CoM position", "m"),
+            ("Linear momentum", "kg m/s"),
+            ("Angular momentum", "kg m^2/s"),
+        ]
+        axes_names = ["x", "y", "z"]
+        return [
+            (f"{group}: {axis}", unit)
+            for group, unit in groups
+            for axis in axes_names
+        ]
+    return [(f"State x[{index}]", "Value") for index in range(number_of_states)]
+
+
+def plot_model_results(
+    reference,
+    prediction,
+    save_path=None,
+    show=True,
+    sampling_period=DEFAULT_SAMPLING_PERIOD,
+):
     """Plot the open-loop DMDc prediction against the test trajectory."""
-    time = np.arange(reference.shape[1]) * SAMPLING_PERIOD
-    groups = [
-        ("CoM position", "m", slice(0, 3)),
-        ("Linear momentum", "kg m/s", slice(3, 6)),
-        ("Angular momentum", "kg m^2/s", slice(6, 9)),
-    ]
-    axes_names = ["x", "y", "z"]
-    figure, axes = plt.subplots(3, 3, figsize=(14, 9), sharex=True)
+    if reference.shape != prediction.shape:
+        raise ValueError("Reference and prediction must have the same shape")
+    if sampling_period <= 0.0:
+        raise ValueError("sampling_period must be positive")
 
-    for column, (title, unit, rows) in enumerate(groups):
-        for row, state_index in enumerate(range(rows.start, rows.stop)):
-            axis = axes[row, column]
-            axis.plot(time, reference[state_index], "b", label="Reference")
-            axis.plot(
-                time,
-                prediction[state_index],
-                "r--",
-                linewidth=0.9,
-                label="DMDc prediction",
-            )
-            axis.set_title(f"{title}: {axes_names[row]}")
-            axis.set_ylabel(unit)
-            axis.grid(True)
+    number_of_states = reference.shape[0]
+    time = np.arange(reference.shape[1]) * sampling_period
+    number_of_columns = min(3, number_of_states)
+    number_of_rows = int(np.ceil(number_of_states / number_of_columns))
+    figure, axes = plt.subplots(
+        number_of_rows,
+        number_of_columns,
+        figsize=(4.8 * number_of_columns, 2.8 * number_of_rows),
+        sharex=True,
+        squeeze=False,
+    )
+    labels = _state_plot_metadata(number_of_states)
 
-    axes[0, 0].legend(loc="best")
-    for axis in axes[-1, :]:
+    for state_index, axis in enumerate(axes.flat[:number_of_states]):
+        title, unit = labels[state_index]
+        axis.plot(time, reference[state_index], "b", label="Reference")
+        axis.plot(
+            time,
+            prediction[state_index],
+            "r--",
+            linewidth=0.9,
+            label="DMDc prediction",
+        )
+        axis.set_title(title)
+        axis.set_ylabel(unit)
         axis.set_xlabel("Time (s)")
+        axis.grid(True)
+
+    for axis in axes.flat[number_of_states:]:
+        axis.set_visible(False)
+    axes.flat[0].legend(loc="best")
     figure.suptitle("Open-loop validation of the learned Koopman model")
     figure.tight_layout()
 
@@ -170,13 +321,31 @@ def plot_model_results(reference, prediction, save_path=None, show=True):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Learn and validate a centroidal DMDc Koopman model"
+        description="Learn and validate a DMDc Koopman model"
     )
     parser.add_argument(
         "--data_dir",
         type=str,
         default=None,
         help="Data directory (default: <repository>/data)",
+    )
+    parser.add_argument(
+        "--state_dim",
+        type=int,
+        default=None,
+        help=(
+            "Expected number of state rows; inferred from the training data "
+            "when omitted"
+        ),
+    )
+    parser.add_argument(
+        "--input_dim",
+        type=int,
+        default=None,
+        help=(
+            "Expected number of input rows; inferred from the training data "
+            "when omitted"
+        ),
     )
     parser.add_argument(
         "--training_source",
@@ -207,6 +376,24 @@ def parse_args():
         help="Initial samples discarded from every trajectory (default: 500)",
     )
     parser.add_argument(
+        "--state_file_pattern",
+        type=str,
+        default=None,
+        help=(
+            "Numbered state filename pattern containing '{index}'; "
+            "default: auto-detect generic or legacy names"
+        ),
+    )
+    parser.add_argument(
+        "--input_file_pattern",
+        type=str,
+        default=None,
+        help=(
+            "Numbered input filename pattern containing '{index}'; "
+            "default: auto-detect generic or legacy names"
+        ),
+    )
+    parser.add_argument(
         "--svd_rank",
         type=int,
         default=None,
@@ -219,17 +406,42 @@ def parse_args():
         help="Saved model path (default: <data_dir>/koopman_dmdc_model.pkl)",
     )
     parser.add_argument(
-        "--motion",
+        "--trajectory",
         type=str,
-        default="trot",
-        choices=["trot", "trot_fast", "jump", "bound"],
-        help="Test motion used for open-loop validation (default: trot)",
+        default=None,
+        help=(
+            "Validation-file prefix used with --data_dir; open-loop "
+            "validation is skipped when no validation source is supplied"
+        ),
+    )
+    parser.add_argument(
+        "--validation_state_file",
+        type=str,
+        default=None,
+        help="Optional explicit state file for open-loop validation",
+    )
+    parser.add_argument(
+        "--validation_input_file",
+        type=str,
+        default=None,
+        help="Optional explicit input file for open-loop validation",
     )
     parser.add_argument(
         "--samples",
         type=int,
         default=None,
         help="Test samples used for validation (default: all)",
+    )
+    parser.add_argument(
+        "--dt",
+        type=float,
+        default=DEFAULT_SAMPLING_PERIOD,
+        help="Sampling period used for the time axis (default: 0.001 s)",
+    )
+    parser.add_argument(
+        "--skip_validation",
+        action="store_true",
+        help="Fit and save the model without requiring validation files",
     )
     parser.add_argument(
         "--save",
@@ -248,6 +460,12 @@ def parse_args():
 def main():
     # Step 1: Parse arguments and set up paths.
     args = parse_args()
+    if args.state_dim is not None and args.state_dim < 1:
+        raise ValueError("--state_dim must be positive")
+    if args.input_dim is not None and args.input_dim < 1:
+        raise ValueError("--input_dim must be positive")
+    if args.dt <= 0.0:
+        raise ValueError("--dt must be positive")
     data_dir = Path(args.data_dir) if args.data_dir else REPOSITORY_ROOT / "data"
     model_path = (
         Path(args.model_path)
@@ -257,28 +475,38 @@ def main():
 
     # Step 2: Load the snapshot pairs used to learn the Koopman model.
     if args.training_source == "combined":
-        X, X_prime, U = load_combined_training_data(data_dir)
-        training_description = "the existing combined trajectories 0 through 30"
+        X, X_prime, U = load_combined_training_data(
+            data_dir,
+            args.state_dim,
+            args.input_dim,
+        )
+        training_description = "the supplied combined snapshot matrices"
     else:
         X, X_prime, U = combine_training_trajectories(
             data_dir,
             args.first_trajectory,
             args.last_trajectory,
             args.trim_start,
+            args.state_dim,
+            args.input_dim,
+            args.state_file_pattern,
+            args.input_file_pattern,
         )
         training_description = (
             f"trajectories {args.first_trajectory} through "
             f"{args.last_trajectory}"
         )
     print(f"Learning from {training_description}: {X.shape[1]} transitions")
+    print(f"Model dimensions: {X.shape[0]} states, {U.shape[0]} inputs")
 
     # Step 3: Fit and save the common DMDc dynamics model.
     koopman_model, singular_values = fit_koopman_model(X, X_prime, U, args.svd_rank)
-    koopman_model.training_trajectory_range = (
-        args.first_trajectory,
-        args.last_trajectory,
-    )
-    koopman_model.training_trim_start = args.trim_start
+    if args.training_source == "trajectories":
+        koopman_model.training_trajectory_range = (
+            args.first_trajectory,
+            args.last_trajectory,
+        )
+        koopman_model.training_trim_start = args.trim_start
 
     # The learned matrices and summary statistics are sufficient for online
     # estimation. Avoid duplicating the complete training set in the model file.
@@ -292,9 +520,35 @@ def main():
     print("Training residual standard deviation:")
     print(koopman_model.training_residual_std)
 
-    # Step 4: Validate the learned model on a separate test motion.
+    # Step 4: Validate the learned model on a separate test trajectory.
+    validation_files_supplied = (
+        args.validation_state_file is not None
+        or args.validation_input_file is not None
+    )
+    if args.skip_validation or (
+        args.trajectory is None and not validation_files_supplied
+    ):
+        print(
+            "Open-loop validation skipped; supply --trajectory or both "
+            "explicit validation files to enable it"
+        )
+        return
+    if args.trajectory is None and not all(
+        (args.validation_state_file, args.validation_input_file)
+    ):
+        raise ValueError(
+            "Without --trajectory, both --validation_state_file and "
+            "--validation_input_file are required"
+        )
+
     reference, control_input = load_test_data(
-        data_dir, args.motion, args.samples
+        data_dir,
+        args.trajectory,
+        args.samples,
+        X.shape[0],
+        U.shape[0],
+        args.validation_state_file,
+        args.validation_input_file,
     )
     prediction = koopman_model.simulate_model(reference[:, 0], control_input)
     print_model_errors(reference, prediction)
@@ -303,6 +557,7 @@ def main():
         prediction,
         save_path=args.save,
         show=not args.no_show,
+        sampling_period=args.dt,
     )
 
 
