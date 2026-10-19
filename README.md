@@ -1,4 +1,4 @@
-# Koopman-Based Centroidal State Estimation
+# Koopman Embedding for Nonlinear Dynamical Systems
 
 **Data-driven centroidal dynamics and state estimation for dynamic legged
 locomotion.**
@@ -180,22 +180,6 @@ trajectory. For validation files that do not follow the default naming scheme,
 use `--validation_state_file` and `--validation_input_file`. The validation
 plots and per-state RMSE output automatically adapt to `n_x`; use `--dt` to set
 the sampling period used on the plot's time axis.
-
-Alternatively, `--training_source trajectories` constructs the snapshot
-matrices from numbered files such as `0_state.dat` and `0_input.dat`. Use
-`--first_trajectory`, `--last_trajectory`, and
-`--trim_start` to select and trim those trajectories.
-
-```bash
-python demo/demo_dmdc.py \
-    --training_source trajectories \
-    --first_trajectory 0 \
-    --last_trajectory 30 \
-    --trim_start 500
-```
-
-This command only trains and saves the model. Open-loop validation runs when
-`--trajectory` or both explicit validation-file arguments are also supplied.
 
 List all learning options with:
 
